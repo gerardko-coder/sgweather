@@ -10,10 +10,10 @@ permissions:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04       # pinned so the runner image doesn't change under this workflow
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download latest dengue GeoJSON from data.gov.sg
         run: |
