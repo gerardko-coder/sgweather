@@ -57,7 +57,8 @@
     border: 1px solid var(--accent); background: var(--panel); color: var(--accent);
     display: flex; align-items: center; justify-content: center;
   }
-  #locateBtn:disabled { opacity: 0.5; cursor: default; }
+  #locateBtn svg { width: 20px; height: 20px; display: block; flex: none; }
+  #locateBtn { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #mapWrap { position: relative; flex: 1 1 60%; min-height: 320px; }
@@ -117,7 +118,7 @@
 <header>
   <h1>SG Environment</h1>
   <div class="segmented" id="modeSwitch" role="tablist" aria-label="Map layer"></div>
-  <button id="locateBtn" disabled title="Near me" aria-label="Near me"></button>
+  <button id="locateBtn" type="button" title="Near me" aria-label="Near me"></button>
   <div id="status">Loading…</div>
 </header>
 
@@ -536,8 +537,15 @@ function updateStatus() {
 
 // ---------- Geolocation ----------
 function locateUser(auto = false) {
-  if (!navigator.geolocation) { $("status").textContent = "Location not supported by this browser"; return; }
-  $("locateBtn").disabled = true;
+  if (!window.isSecureContext) {
+    $("status").textContent = "Location needs a secure (https) page";
+    return;
+  }
+  if (!navigator.geolocation) {
+    $("status").textContent = "Location is not supported by this browser";
+    return;
+  }
+  if (!auto) $("status").textContent = "Finding your location…";
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
@@ -548,13 +556,18 @@ function locateUser(auto = false) {
       }).addTo(map).bindPopup("You are here");
       map.flyTo(userLatLng, 14, { duration: 1 });
       render();
-      $("locateBtn").disabled = false;
+      updateStatus();
     },
     (err) => {
-      if (!auto) $("status").textContent = err.code === 1 ? "Location permission denied" : "Could not get your location";
-      $("locateBtn").disabled = false;
+      if (auto) { updateStatus(); return; }   // silent on page load if permission isn't granted yet
+      const messages = {
+        1: "Location blocked. Allow it for this site in Chrome’s site settings, then tap again.",
+        2: "Couldn’t determine your location. Check that GPS/location is on.",
+        3: "Location timed out. Tap the button to try again.",
+      };
+      $("status").textContent = messages[err.code] || "Could not get your location";
     },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
   );
 }
 
