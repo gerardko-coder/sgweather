@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Singapore Air Quality & Temperature</title>
+<title>Singapore Environment Map</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
@@ -30,28 +30,34 @@
   body { display: flex; flex-direction: column; height: 100%; }
 
   header {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-    padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px;
     background: var(--panel); border-bottom: 1px solid var(--border);
   }
-  header h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
-  #status { font-size: 0.78rem; color: var(--muted); flex-basis: 100%; text-align: center; min-height: 1em; order: 3; }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 600; white-space: nowrap; }
+  #status { font-size: 0.75rem; color: var(--muted); flex-basis: 100%; text-align: center; order: 3; min-height: 1em; }
   @media (min-width: 900px) {
-    #status { flex-basis: auto; flex: 1; order: 0; }
+    #status { flex: 1; flex-basis: auto; order: 0; }
   }
 
-  .segmented { display: inline-flex; border: 1px solid var(--accent); border-radius: 999px; overflow: hidden; }
+  .segmented {
+    display: inline-flex; border: 1px solid var(--accent); border-radius: 999px; overflow: hidden; margin-left: auto;
+  }
   .segmented button {
-    font: inherit; font-size: 0.85rem; padding: 7px 12px; border: none; cursor: pointer;
+    width: 38px; height: 34px; padding: 0; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
     background: transparent; color: var(--accent);
   }
+  .segmented button + button { border-left: 1px solid var(--border); }
   .segmented button.active { background: var(--accent); color: #fff; }
+  .segmented button svg, .icon { width: 18px; height: 18px; }
 
-  button.primary {
-    font: inherit; font-size: 0.85rem; padding: 7px 14px; border-radius: 999px; cursor: pointer;
-    border: 1px solid var(--accent); background: var(--accent); color: #fff; white-space: nowrap;
+  #locateBtn {
+    width: 36px; height: 36px; padding: 0; border-radius: 50%; cursor: pointer; flex: none;
+    border: 1px solid var(--accent); background: var(--panel); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
   }
-  button:disabled { opacity: 0.6; cursor: default; }
+  #locateBtn:disabled { opacity: 0.5; cursor: default; }
 
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #mapWrap { position: relative; flex: 1 1 60%; min-height: 320px; }
@@ -89,16 +95,15 @@
 
   .pin {
     transform: translate(-50%, -50%);
+    display: flex; align-items: center; gap: 3px;
     padding: 3px 6px; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 700;
     white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.8);
     text-shadow: 0 1px 2px rgba(0,0,0,.35);
   }
+  .pin svg { width: 14px; height: 14px; flex: none; }
   .pin.nearby { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .bolt {
-    transform: translate(-50%, -50%);
-    font-size: 22px; line-height: 1;
-    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 3px #facc15);
-  }
+  .bolt { transform: translate(-50%, -50%); filter: drop-shadow(0 0 2px #000); }
+  .bolt svg { width: 24px; height: 24px; fill: #facc15; stroke: #1f2933; stroke-width: 1.5; }
 
   @media (min-width: 900px) {
     main { flex-direction: row; }
@@ -110,14 +115,10 @@
 <body>
 
 <header>
-  <h1>SG Air Quality</h1>
-  <div class="segmented" role="tablist">
-    <button id="modeTemp" data-mode="temp">Temp</button>
-    <button id="modePm25" class="active" data-mode="pm25">PM2.5</button>
-    <button id="modeRain" data-mode="rain">Rain</button>
-  </div>
+  <h1>SG Environment</h1>
+  <div class="segmented" id="modeSwitch" role="tablist" aria-label="Map layer"></div>
+  <button id="locateBtn" disabled title="Near me" aria-label="Near me"></button>
   <div id="status">Loading…</div>
-  <button id="locateBtn" class="primary" disabled>Near me</button>
 </header>
 
 <main>
@@ -126,131 +127,139 @@
     <div id="legend"></div>
   </div>
   <aside>
-    <h2 id="nearbyTitle">Nearby stations</h2>
-    <ol id="nearby"><li class="empty">Allow location access to see stations near you.</li></ol>
+    <h2 id="nearbyTitle">Nearby</h2>
+    <ol id="nearby"><li class="empty">Allow location access to see things near you.</li></ol>
   </aside>
 </main>
 
 <script>
-// ---------- Config ----------
-const DATASETS = {
-  temp: {
-    url: "https://api-open.data.gov.sg/v2/real-time/api/air-temperature",
-    label: "Air temperature",
-    unit: "°C",
-    decimals: 1,
-    color: tempColor,
-  },
-  pm25: {
-    url: "https://api-open.data.gov.sg/v2/real-time/api/pm25",
-    label: "PM2.5",
-    unit: "µg/m³",
-    decimals: 0,
-    color: pm25Color,
-  },
-  rain: {
-    url: "https://api-open.data.gov.sg/v2/real-time/api/rainfall",
-    label: "Rainfall (5-min)",
-    unit: "mm",
-    decimals: 1,
-    color: rainColor,
-  },
+// ---------- Icons (inline SVG, drawn with currentColor) ----------
+const SVG = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const ICONS = {
+  temp: SVG(`<path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/>`),
+  rain: SVG(`<path d="M12 2.7C12 2.7 5 10 5 15a7 7 0 0 0 14 0c0-5-7-12.3-7-12.3z"/>`),
+  lightning: SVG(`<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/>`),
+  dengue: SVG(`<ellipse cx="12" cy="14" rx="2.2" ry="5"/><circle cx="12" cy="7.5" r="1.8"/><path d="M10 11C4 9 3 4 6 3c3 0 4 4 4 8z"/><path d="M14 11c6-2 7-7 4-8-3 0-4 4-4 8z"/><path d="M9.5 12 4 11M9.5 15 4 16M9.5 18 5 21M14.5 12 20 11M14.5 15 20 16M14.5 18 19 21"/>`),
+  pm25: SVG(`<path d="M9.6 4.6A2 2 0 1 1 11 8H2m10.6 11.4A2 2 0 1 0 14 16H2m15.7-8.3A2.5 2.5 0 1 1 19.5 12H2"/>`),
+  crosshair: SVG(`<circle cx="12" cy="12" r="7"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>`),
 };
+
+// ---------- Modes (order = slider order) ----------
+const MODE_ORDER = ["temp", "rain", "lightning", "dengue", "pm25"];
+const MODES = {
+  temp:      { label: "Temperature",     unit: "°C",    decimals: 1 },
+  rain:      { label: "Rainfall",        unit: "mm",    decimals: 1 },
+  lightning: { label: "Lightning" },
+  dengue:    { label: "Dengue clusters" },
+  pm25:      { label: "PM2.5",           unit: "µg/m³", decimals: 0 },
+};
+const DEFAULT_MODE = "pm25";
+
+// ---------- Data sources ----------
+const SOURCES = {
+  temp: "https://api-open.data.gov.sg/v2/real-time/api/air-temperature",
+  pm25: "https://api-open.data.gov.sg/v2/real-time/api/pm25",
+  rain: "https://api-open.data.gov.sg/v2/real-time/api/rainfall",
+  lightning: "https://api-open.data.gov.sg/v2/real-time/api/weather?api=lightning",
+  dengue: "./dengue.geojson",   // refreshed by the GitHub Action every few hours
+};
+
 const SG_CENTER = [1.3521, 103.8198];
 const SG_BOUNDS = L.latLngBounds([1.15, 103.6], [1.48, 104.1]);
 const NEARBY_COUNT = 10;
-const REFRESH_MS = 5 * 60 * 1000;
+const REFRESH_MS = 5 * 60 * 1000;      // realtime feeds
+const DENGUE_REFRESH_MS = 30 * 60 * 1000;
+
+// ---------- Colour scales ----------
+function tempColor(v) {
+  const c = Math.min(Math.max(v, 24), 34);
+  return `hsl(${(220 - ((c - 24) / 10) * 220).toFixed(0)}, 75%, 42%)`;
+}
+
+const PM25_BANDS = [
+  { max: 12,       color: "#22c55e", label: "Good",                  range: "0–12" },
+  { max: 35,       color: "#eab308", label: "Moderate",              range: "13–35" },
+  { max: 55,       color: "#f97316", label: "Unhealthy (sensitive)", range: "36–55" },
+  { max: 150,      color: "#ef4444", label: "Unhealthy",             range: "56–150" },
+  { max: Infinity, color: "#8b5cf6", label: "Very unhealthy",        range: ">150" },
+];
+const pm25Band = (v) => PM25_BANDS.find(b => v <= b.max);
+const pm25Color = (v) => pm25Band(v).color;
+
+const RAIN_BANDS = [
+  { max: 0,        color: "#e0f2fe", label: "None",           range: "0" },
+  { max: 0.5,      color: "#7dd3fc", label: "Light",          range: "0–0.5" },
+  { max: 2,        color: "#38bdf8", label: "Light–moderate", range: "0.5–2" },
+  { max: 5,        color: "#0284c7", label: "Moderate",       range: "2–5" },
+  { max: 10,       color: "#1d4ed8", label: "Heavy",          range: "5–10" },
+  { max: Infinity, color: "#1e3a8a", label: "Very heavy",     range: ">10" },
+];
+const rainBand = (v) => RAIN_BANDS.find(b => v <= b.max) || RAIN_BANDS[RAIN_BANDS.length - 1];
+const rainColor = (v) => rainBand(v).color;
+
+const DENGUE_BANDS = [
+  { max: 9,        color: "#fecaca", label: "Small",  range: "1–9 cases" },
+  { max: 29,       color: "#f87171", label: "Medium", range: "10–29 cases" },
+  { max: 99,       color: "#dc2626", label: "Large",  range: "30–99 cases" },
+  { max: Infinity, color: "#7f1d1d", label: "Major",  range: "100+ cases" },
+];
+const dengueBand = (n) => DENGUE_BANDS.find(b => n <= b.max) || DENGUE_BANDS[DENGUE_BANDS.length - 1];
+
+// Pale pins need dark text
+function textColorFor(key, value) {
+  if (key === "rain" && value <= 0.5) return "#0f172a";
+  return "#fff";
+}
 
 // ---------- State ----------
-const stations = { temp: [], pm25: [], rain: [] };   // each: [{ id, name, lat, lng, value, timestamp }]
-let mode = "pm25";
+const items = { temp: [], pm25: [], rain: [], lightning: [], dengue: [] };   // [{ id, name, lat, lng, value, timestamp, ... }]
+let mode = DEFAULT_MODE;
 let userLatLng = null;
 let userMarker = null;
-let pinLayer;
-let map;
+let map, pinLayer, lightningLayer, dengueLayer;
+let dengueError = null;
 
 // ---------- Helpers ----------
 const $ = (id) => document.getElementById(id);
-function setStatus(msg) { $("status").textContent = msg; }
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-// Temperature (24–34 °C) on a blue → red scale
-function tempColor(v) {
-  const c = Math.min(Math.max(v, 24), 34);
-  const hue = 220 - ((c - 24) / 10) * 220;
-  return `hsl(${hue.toFixed(0)}, 75%, 42%)`;
-}
-
-// PM2.5 (µg/m³) banded by the common 24-hour breakpoints used in Singapore-style AQ categories
-const PM25_BANDS = [
-  { max: 12,       color: "#22c55e", label: "Good" },
-  { max: 35,       color: "#eab308", label: "Moderate" },
-  { max: 55,       color: "#f97316", label: "Unhealthy (sensitive)" },
-  { max: 150,      color: "#ef4444", label: "Unhealthy" },
-  { max: Infinity, color: "#8b5cf6", label: "Very unhealthy" },
-];
-function pm25Band(v) { return PM25_BANDS.find(b => v <= b.max); }
-function pm25Color(v) { return pm25Band(v).color; }
-
-// Rainfall (mm per 5 minutes) as shades of blue: pale = dry, deep blue = heavy rain
-const RAIN_BANDS = [
-  { max: 0,        color: "#e0f2fe", label: "None" },
-  { max: 0.5,      color: "#7dd3fc", label: "Light" },
-  { max: 2,        color: "#38bdf8", label: "Light–moderate" },
-  { max: 5,        color: "#0284c7", label: "Moderate" },
-  { max: 10,       color: "#1d4ed8", label: "Heavy" },
-  { max: Infinity, color: "#1e3a8a", label: "Very heavy" },
-];
-function rainBand(v) { return RAIN_BANDS.find(b => v <= b.max) || RAIN_BANDS[RAIN_BANDS.length - 1]; }
-function rainColor(v) { return rainBand(v).color; }
-
-// Pale backgrounds need dark text for legibility
-function textColorFor(key, value) {
-  return key === "rain" && value <= 0.5 ? "#0f172a" : "#fff";
-}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371, toRad = d => d * Math.PI / 180;
-  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const R = 6371, rad = d => d * Math.PI / 180;
+  const dLat = rad(lat2 - lat1), dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
 }
-function formatDistance(km) {
-  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
-}
-function fmtValue(key, v) {
-  return `${v.toFixed(DATASETS[key].decimals)}`;
+const formatDistance = (km) => km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
+const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+const fmtValue = (key, v) => Number(v).toFixed(MODES[key].decimals ?? 0);
+
+// ---------- Fetch helpers ----------
+async function getJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.code !== 0) throw new Error(json.errorMsg || json.errMsg || "API returned an error");
+  return json;
 }
 
-// ---------- Data ----------
-// Both v2 endpoints share the same shape: data.stations, data.readings[].data[].{stationId, value}
-async function fetchDataset(url) {
-  const stationMap = new Map();   // id -> { name, lat, lng }
-  const latest = new Map();       // id -> { value, timestamp }
+// Follows data.gov.sg v2 paginationToken until the last page
+async function getAllPages(url, handlePage) {
   let token = null;
-
   do {
     const u = new URL(url);
     if (token) u.searchParams.set("paginationToken", token);
+    const json = await getJson(u);
+    handlePage(json.data || {});
+    token = json.data?.paginationToken || null;
+  } while (token);
+}
 
-    const res = await fetch(u);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if (json.code !== 0) throw new Error(json.errorMsg || "API returned an error");
-
-    const data = json.data || {};
+// Station-based feeds (temperature, rainfall): stations[] + readings[].data[].{stationId, value}
+async function fetchStationValues(url) {
+  const stationMap = new Map(), latest = new Map();
+  await getAllPages(url, data => {
     for (const s of data.stations || []) {
-      if (s.location) {
-        stationMap.set(s.id, {
-          name: s.name,
-          lat: Number(s.location.latitude),
-          lng: Number(s.location.longitude),
-        });
-      }
+      if (s.location) stationMap.set(s.id, { name: s.name, lat: Number(s.location.latitude), lng: Number(s.location.longitude) });
     }
     for (const r of data.readings || []) {
       for (const item of r.data || []) {
@@ -260,212 +269,275 @@ async function fetchDataset(url) {
         }
       }
     }
-    token = data.paginationToken || null;
-  } while (token);
-
-  const result = [];
+  });
+  const out = [];
   for (const [id, info] of stationMap) {
-    const reading = latest.get(id);
-    if (!reading || Number.isNaN(reading.value)) continue;
-    result.push({ id, name: info.name, lat: info.lat, lng: info.lng, value: reading.value, timestamp: reading.timestamp });
+    const rd = latest.get(id);
+    if (!rd || Number.isNaN(rd.value)) continue;
+    out.push({ id, name: info.name, lat: info.lat, lng: info.lng, value: rd.value, timestamp: rd.timestamp });
   }
-  return result;
+  return out;
 }
 
-// PM2.5 is published per region (north, south, east, west, central), not per station.
-// Each region is placed at its labelLocation so it can be drawn and ranked like a station.
+// PM2.5 is published per region with a label location
 async function fetchPm25(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.code !== 0) throw new Error(json.errorMsg || "API returned an error");
-
+  const json = await getJson(url);
   const data = json.data || {};
   const locations = new Map((data.regionMetadata || []).map(r => [r.name, r.labelLocation]));
-  const item = (data.items || [])[0];          // latest item
+  const item = (data.items || [])[0];
   const values = item?.readings?.pm25_one_hourly || {};
-
-  const result = [];
+  const out = [];
   for (const [name, value] of Object.entries(values)) {
     const loc = locations.get(name);
     if (!loc || value == null || Number.isNaN(Number(value))) continue;
-    result.push({
+    out.push({
       id: name,
       name: `${name.charAt(0).toUpperCase()}${name.slice(1)} region`,
-      lat: Number(loc.latitude),
-      lng: Number(loc.longitude),
-      value: Number(value),
-      timestamp: item.timestamp,
+      lat: Number(loc.latitude), lng: Number(loc.longitude),
+      value: Number(value), timestamp: item.timestamp,
     });
   }
-  return result;
+  return out;
 }
 
-// Lightning feed: data.records[].item.readings[] (empty when no strikes are detected).
-// Accepts several common location field layouts since strike records may vary.
-const LIGHTNING_URL = "https://api-open.data.gov.sg/v2/real-time/api/weather?api=lightning";
+// Lightning strikes: data.records[].item.readings[] with location (strings) and datetime
 async function fetchLightning(url) {
-  const result = [];
-  let token = null;
-
-  do {
-    const u = new URL(url);
-    if (token) u.searchParams.set("paginationToken", token);
-
-    const res = await fetch(u);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if (json.code !== 0) throw new Error(json.errorMsg || "API returned an error");
-
-    for (const rec of json.data?.records || []) {
+  const out = [];
+  await getAllPages(url, data => {
+    for (const rec of data.records || []) {
       for (const r of rec.item?.readings || []) {
-        // Schema: location.latitude / location.longitude are strings; datetime is per reading
-        const lat = Number(r.location?.latitude);
-        const lng = Number(r.location?.longitude);
+        const lat = Number(r.location?.latitude), lng = Number(r.location?.longitude);
         if (!r.location || Number.isNaN(lat) || Number.isNaN(lng)) continue;
-        result.push({
-          lat,
-          lng,
+        out.push({
+          id: `${lat},${lng},${r.datetime}`,
+          name: r.text || "Lightning strike",
+          lat, lng, value: null,
           timestamp: r.datetime ?? rec.datetime,
-          type: r.type,        // "C" = cloud to cloud, "G" = cloud to ground
-          text: r.text,
+          strikeType: r.type,      // "C" cloud-to-cloud, "G" cloud-to-ground
         });
       }
     }
-    token = json.data?.paginationToken || null;
-  } while (token);
-
-  return result;
+  });
+  return out;
 }
 
-// ---------- Lightning rendering ----------
-let lightning = [];
-let lightningLayer;
-
-function renderLightning() {
-  lightningLayer.clearLayers();
-  for (const s of lightning) {
-    const icon = L.divIcon({ className: "", html: `<div class="bolt">⚡</div>`, iconSize: null });
-    L.marker([s.lat, s.lng], { icon, title: "Lightning detected", zIndexOffset: 1000 })
-      .bindPopup(`<strong>Lightning detected</strong>${s.text ? `<br>${escapeHtml(s.text)}` : ""}<br>${new Date(s.timestamp).toLocaleTimeString()}`)
-      .addTo(lightningLayer);
+// Dengue clusters: poll-download gives a temporary link to the GeoJSON file
+async function fetchDengue() {
+  // Static file committed to the repo by the GitHub Action (see .github/workflows/update-dengue.yml)
+  const res = await fetch(SOURCES.dengue, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`dengue.geojson HTTP ${res.status}`);
+  const geo = await res.json();
+  if (!Array.isArray(geo.features) || geo.features.length === 0) {
+    throw new Error("GeoJSON contains no dengue cluster features");
   }
+
+  return geo.features.map((f, i) => {
+    const p = f.properties || {};
+    const c = L.geoJSON(f).getBounds().getCenter();
+    return {
+      id: String(p.OBJECTID ?? i),
+      name: p.LOCALITY || p.NAME || "Dengue cluster",
+      lat: c.lat, lng: c.lng,
+      value: Number(p.CASE_SIZE) || 0,
+      timestamp: null,
+      feature: f,
+      props: p,
+    };
+  });
 }
 
-// ---------- Map rendering ----------
-function renderPins() {
-  pinLayer.clearLayers();
-  const key = mode;
-  const cfg = DATASETS[key];
-  const nearbyIds = new Set(getNearby().map(s => s.id));
+// ---------- Icons for map pins ----------
+function pinHtml(color, textColor, inner) {
+  return `<div class="pin" style="background:${color};color:${textColor}">${inner}</div>`;
+}
 
-  for (const s of stations[key]) {
-    const color = cfg.color(s.value);
+// ---------- Popups ----------
+function popupHtml(key, s) {
+  if (key === "dengue") {
+    const p = s.props;
+    const link = typeof p.HYPERLINK === "string" && p.HYPERLINK.startsWith("https://")
+      ? `<br><a href="${esc(p.HYPERLINK)}" target="_blank" rel="noopener">NEA details</a>` : "";
+    const sites = [
+      ["Homes", p.HOMES], ["Public places", p.PUBLIC_PLACES], ["Construction sites", p.CONSTRUCTION_SITES],
+    ].filter(([, v]) => v && String(v).trim())
+     .map(([label, v]) => `<br><small><b>${label}:</b> ${esc(v)}</small>`).join("");
+    return `<strong>${esc(s.name)}</strong><br>${s.value} case${s.value === 1 ? "" : "s"}${sites}${link}`;
+  }
+  if (key === "lightning") {
+    return `<strong>${esc(s.name)}</strong><br>${fmtTime(s.timestamp)}`;
+  }
+  const m = MODES[key];
+  return `<strong>${esc(s.name)}</strong><br>${m.label}: ${fmtValue(key, s.value)} ${m.unit}`;
+}
+
+// ---------- Map drawing ----------
+function drawStationPins() {
+  for (const s of items[mode]) {
+    const color = mode === "temp" ? tempColor(s.value) : mode === "rain" ? rainColor(s.value) : pm25Color(s.value);
+    const nearbyIds = new Set(getNearby().map(x => x.id));
     const icon = L.divIcon({
       className: "",
-      html: `<div class="pin ${nearbyIds.has(s.id) ? "nearby" : ""}" style="background:${color};color:${textColorFor(key, s.value)}">${fmtValue(key, s.value)}</div>`,
+      html: `<div class="pin ${nearbyIds.has(s.id) ? "nearby" : ""}" style="background:${color};color:${textColorFor(mode, s.value)}">${fmtValue(mode, s.value)}</div>`,
       iconSize: null,
     });
-    L.marker([s.lat, s.lng], { icon, title: s.name })
-      .bindPopup(`<strong>${escapeHtml(s.name)}</strong><br>${cfg.label}: ${fmtValue(key, s.value)} ${cfg.unit}`)
-      .addTo(pinLayer);
+    L.marker([s.lat, s.lng], { icon }).bindPopup(popupHtml(mode, s)).addTo(pinLayer);
   }
 }
 
+function drawLightning() {
+  for (const s of items.lightning) {
+    const icon = L.divIcon({ className: "", html: `<div class="bolt">${ICONS.lightning}</div>`, iconSize: null });
+    L.marker([s.lat, s.lng], { icon, zIndexOffset: 1000 }).bindPopup(popupHtml("lightning", s)).addTo(lightningLayer);
+  }
+}
+
+function drawDengue() {
+  for (const s of items.dengue) {
+    const band = dengueBand(s.value);
+    L.geoJSON(s.feature, {
+      style: { color: band.color, weight: 1.5, fillColor: band.color, fillOpacity: 0.35 },
+    }).bindPopup(popupHtml("dengue", s)).addTo(dengueLayer);
+
+    const icon = L.divIcon({
+      className: "",
+      html: pinHtml(band.color, "#fff", `${ICONS.dengue}<span>${s.value}</span>`),
+      iconSize: null,
+    });
+    L.marker([s.lat, s.lng], { icon }).bindPopup(popupHtml("dengue", s)).addTo(dengueLayer);
+  }
+}
+
+function renderMap() {
+  pinLayer.clearLayers();
+  lightningLayer.clearLayers();
+  dengueLayer.clearLayers();
+
+  if (mode === "lightning") drawLightning();
+  else if (mode === "dengue") drawDengue();
+  else drawStationPins();
+}
+
+// ---------- Legend ----------
 function renderLegend() {
   const el = $("legend");
   if (mode === "temp") {
     const stops = [24, 26, 28, 30, 32, 34];
     el.innerHTML = `<div class="title">Air temperature (°C)</div><div class="row">` +
-      stops.map(t => `<span><span class="swatch" style="background:${tempColor(t)}"></span>${t}</span>`).join("") +
-      `</div>`;
-  } else if (mode === "rain") {
-    el.innerHTML = `<div class="title">Rainfall (mm per 5 min)</div>` +
-      RAIN_BANDS.map((b, i) => {
-        const lo = i === 0 ? "0" : `${RAIN_BANDS[i - 1].max}`;
-        const hi = b.max === Infinity ? "+" : `–${b.max}`;
-        const range = i === 0 ? "0" : (b.max === Infinity ? `>${lo}` : `${lo}${hi}`);
-        return `<div class="row"><span class="swatch" style="background:${b.color}"></span>${range} ${b.label}</div>`;
-      }).join("");
-  } else {
-    el.innerHTML = `<div class="title">PM2.5 (µg/m³)</div>` +
-      PM25_BANDS.map((b, i) => {
-        const lo = i === 0 ? 0 : PM25_BANDS[i - 1].max + 1;
-        const hi = b.max === Infinity ? "+" : `–${b.max}`;
-        return `<div class="row"><span class="swatch" style="background:${b.color}"></span>${lo}${hi} ${b.label}</div>`;
-      }).join("");
+      stops.map(t => `<span><span class="swatch" style="background:${tempColor(t)}"></span>${t}</span>`).join("") + `</div>`;
+    return;
   }
+  if (mode === "lightning") {
+    el.innerHTML = `<div class="title">Lightning</div><div class="row">${ICONS.lightning.replace("<svg", '<svg class="icon"')} Recent strikes</div>`;
+    return;
+  }
+  const bands = mode === "rain" ? RAIN_BANDS : mode === "dengue" ? DENGUE_BANDS : PM25_BANDS;
+  const titles = { rain: "Rainfall (mm per 5 min)", dengue: "Dengue cases per cluster", pm25: "PM2.5 (µg/m³)" };
+  el.innerHTML = `<div class="title">${titles[mode]}</div>` +
+    bands.map(b => `<div class="row"><span class="swatch" style="background:${b.color}"></span>${b.range} ${b.label}</div>`).join("");
 }
 
 // ---------- Nearby list ----------
 function getNearby() {
   if (!userLatLng) return [];
-  return stations[mode]
+  return items[mode]
     .map(s => ({ ...s, distKm: haversineKm(userLatLng[0], userLatLng[1], s.lat, s.lng) }))
     .sort((a, b) => a.distKm - b.distKm)
     .slice(0, NEARBY_COUNT);
 }
 
+function chipHtml(s) {
+  if (mode === "lightning") {
+    return `<div class="chip" style="background:#facc15;color:#422006">${fmtTime(s.timestamp)}</div>`;
+  }
+  if (mode === "dengue") {
+    return `<div class="chip" style="background:${dengueBand(s.value).color}">${s.value} case${s.value === 1 ? "" : "s"}</div>`;
+  }
+  const color = mode === "temp" ? tempColor(s.value) : mode === "rain" ? rainColor(s.value) : pm25Color(s.value);
+  return `<div class="chip" style="background:${color};color:${textColorFor(mode, s.value)}">${fmtValue(mode, s.value)} ${MODES[mode].unit}</div>`;
+}
+
+function subtitleFor(s) {
+  let sub = "";
+  if (mode === "pm25") sub = `${pm25Band(s.value).label} · `;
+  if (mode === "rain") sub = `${rainBand(s.value).label} · `;
+  return `${sub}${formatDistance(s.distKm)} away`;
+}
+
 function renderNearby() {
   const list = $("nearby");
-  const cfg = DATASETS[mode];
-  $("nearbyTitle").textContent = userLatLng ? `Nearest ${cfg.label} stations` : "Nearby stations";
+  $("nearbyTitle").textContent = userLatLng ? `Nearest ${MODES[mode].label.toLowerCase()}` : "Nearby";
 
   if (!userLatLng) {
-    list.innerHTML = `<li class="empty">Allow location access to see stations near you.</li>`;
+    list.innerHTML = `<li class="empty">Allow location access to see things near you.</li>`;
     return;
   }
   const nearby = getNearby();
   if (!nearby.length) {
-    list.innerHTML = `<li class="empty">No ${cfg.label} data available.</li>`;
+    list.innerHTML = `<li class="empty">No ${MODES[mode].label.toLowerCase()} data available.</li>`;
     return;
   }
-  list.innerHTML = nearby.map(s => {
-    const color = cfg.color(s.value);
-    const sub = mode === "pm25" ? `${pm25Band(s.value).label} · ` : "";
-    return `
-    <li data-id="${escapeHtml(s.id)}">
+  list.innerHTML = nearby.map(s => `
+    <li data-id="${esc(s.id)}">
       <div>
-        <div class="name">${escapeHtml(s.name)}</div>
-        <div class="dist">${sub}${formatDistance(s.distKm)} away</div>
+        <div class="name">${esc(s.name)}</div>
+        <div class="dist">${subtitleFor(s)}</div>
       </div>
-      <div class="chip" style="background:${color};color:${textColorFor(mode, s.value)}">${fmtValue(mode, s.value)} ${cfg.unit}</div>
-    </li>`;
-  }).join("");
+      ${chipHtml(s)}
+    </li>`).join("");
 
   list.querySelectorAll("li[data-id]").forEach(li => {
     li.addEventListener("click", () => {
-      const s = stations[mode].find(x => x.id === li.dataset.id);
+      const s = items[mode].find(x => x.id === li.dataset.id);
       if (!s) return;
       map.setView([s.lat, s.lng], 16);
-      pinLayer.eachLayer(m => { if (m.options.title === s.name) m.openPopup(); });
+      L.popup().setLatLng([s.lat, s.lng]).setContent(popupHtml(mode, s)).openOn(map);
     });
   });
 }
 
+// ---------- Render & mode switch ----------
 function render() {
   renderLegend();
-  renderPins();
+  renderMap();
   renderNearby();
 }
 
-// ---------- Mode switch ----------
 function setMode(newMode) {
   mode = newMode;
-  document.querySelectorAll(".segmented button").forEach(b => {
-    b.classList.toggle("active", b.dataset.mode === mode);
+  document.querySelectorAll("#modeSwitch button").forEach(b => {
+    const active = b.dataset.mode === mode;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", active);
   });
   render();
+  updateStatus();
+}
+
+function buildModeSwitch() {
+  const wrap = $("modeSwitch");
+  wrap.innerHTML = MODE_ORDER.map(key => `
+    <button type="button" data-mode="${key}" title="${MODES[key].label}" aria-label="${MODES[key].label}" role="tab">${ICONS[key]}</button>
+  `).join("");
+  wrap.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
+}
+
+// ---------- Status ----------
+let realtimeFailures = [];
+function updateStatus() {
+  const count = items[mode].length;
+  const label = MODES[mode].label;
+  const problems = realtimeFailures.map(f => `couldn't load ${f}`);
+  if (dengueError) problems.push(`dengue: ${dengueError}`);
+  const failText = problems.length ? ` · ${problems.join(" · ")}` : "";
+  const countText = mode === "lightning" ? `${count} recent strike${count === 1 ? "" : "s"}` : `${count} ${label.toLowerCase()} readings`;
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  $("status").textContent = `${countText} · updated ${time}${failText}`;
 }
 
 // ---------- Geolocation ----------
 function locateUser(auto = false) {
-  if (!navigator.geolocation) {
-    setStatus("Location is not supported by this browser");
-    return;
-  }
+  if (!navigator.geolocation) { $("status").textContent = "Location not supported by this browser"; return; }
   $("locateBtn").disabled = true;
-  setStatus("Getting your location…");
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
@@ -474,15 +546,12 @@ function locateUser(auto = false) {
       userMarker = L.circleMarker(userLatLng, {
         radius: 8, color: "#ffffff", weight: 2, fillColor: "#2563eb", fillOpacity: 1,
       }).addTo(map).bindPopup("You are here");
-
       map.flyTo(userLatLng, 14, { duration: 1 });
       render();
-      setStatus(`Updated ${new Date().toLocaleTimeString()}`);
       $("locateBtn").disabled = false;
     },
     (err) => {
-      const msg = err.code === 1 ? "Location permission denied" : "Could not get your location";
-      setStatus(auto ? "Showing all of Singapore. Tap “Near me” to locate yourself." : msg);
+      if (!auto) $("status").textContent = err.code === 1 ? "Location permission denied" : "Could not get your location";
       $("locateBtn").disabled = false;
     },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
@@ -490,47 +559,43 @@ function locateUser(auto = false) {
 }
 
 // ---------- Refresh ----------
-async function refreshReadings() {
-  setStatus("Refreshing readings…");
-  const keys = Object.keys(DATASETS);
-  const fetchers = {
-    temp: () => fetchDataset(DATASETS.temp.url),   // station-based
-    pm25: () => fetchPm25(DATASETS.pm25.url),      // region-based
-    rain: () => fetchDataset(DATASETS.rain.url),   // station-based, same format as temp
+async function refreshRealtime() {
+  const jobs = {
+    temp: () => fetchStationValues(SOURCES.temp),
+    rain: () => fetchStationValues(SOURCES.rain),
+    pm25: () => fetchPm25(SOURCES.pm25),
+    lightning: () => fetchLightning(SOURCES.lightning),
   };
-  const results = await Promise.allSettled(keys.map(k => fetchers[k]()));
+  const keys = Object.keys(jobs);
+  const results = await Promise.allSettled(keys.map(k => jobs[k]()));
 
   const failures = [];
   results.forEach((r, i) => {
-    if (r.status === "fulfilled") stations[keys[i]] = r.value;
-    else { console.error(r.reason); failures.push(`${DATASETS[keys[i]].label}: ${r.reason.message}`); }
+    if (r.status === "fulfilled") items[keys[i]] = r.value;
+    else { console.error(r.reason); failures.push(MODES[keys[i]].label.toLowerCase()); }
   });
-
-  try {
-    lightning = await fetchLightning(LIGHTNING_URL);
-  } catch (err) {
-    console.error(err);
-    lightning = [];
-    failures.push(`Lightning: ${err.message}`);
-  }
-  renderLightning();
+  realtimeFailures = failures;
 
   render();
-  const counts = keys.map(k => `${stations[k].length} ${DATASETS[k].label}`).join(" · ");
-  setStatus(failures.length
-    ? `Failed: ${failures.join("; ")}`
-    : `${counts} · updated ${new Date().toLocaleTimeString()}`);
+  updateStatus();
   $("locateBtn").disabled = false;
+}
+
+async function refreshDengue() {
+  try {
+    items.dengue = await fetchDengue(SOURCES.dengue);
+    dengueError = null;
+  } catch (err) {
+    console.error(err);
+    dengueError = err.message;
+  }
+  if (mode === "dengue") render();
+  updateStatus();
 }
 
 // ---------- Init ----------
 function init() {
-  map = L.map("map", {
-    center: SG_CENTER,
-    zoom: 11,
-    minZoom: 10,
-    maxBounds: SG_BOUNDS.pad(0.3),
-  });
+  map = L.map("map", { center: SG_CENTER, zoom: 11, minZoom: 10, maxBounds: SG_BOUNDS.pad(0.3) });
 
   // Esri World Street Map: no API key needed. Note the {y}/{x} order in the URL.
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
@@ -542,15 +607,18 @@ function init() {
   map.fitBounds(SG_BOUNDS);
   pinLayer = L.layerGroup().addTo(map);
   lightningLayer = L.layerGroup().addTo(map);
+  dengueLayer = L.layerGroup().addTo(map);
 
-  document.querySelectorAll(".segmented button").forEach(b => {
-    b.addEventListener("click", () => setMode(b.dataset.mode));
-  });
+  buildModeSwitch();
+  $("locateBtn").innerHTML = ICONS.crosshair;
   $("locateBtn").addEventListener("click", () => locateUser(false));
 
-  refreshReadings().then(() => locateUser(true));
-  setInterval(refreshReadings, REFRESH_MS);
-  renderLegend();
+  setMode(DEFAULT_MODE);
+
+  refreshRealtime().then(() => locateUser(true));
+  refreshDengue();
+  setInterval(refreshRealtime, REFRESH_MS);
+  setInterval(refreshDengue, DENGUE_REFRESH_MS);
 }
 
 init();
